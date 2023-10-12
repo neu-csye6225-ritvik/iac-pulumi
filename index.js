@@ -16,6 +16,7 @@ let configFileName = `Pulumi.${stackName}.yaml`;
 
 let id = 0;
 
+
 const createSubnets = (vpc, type, count) => {
     let subnets = [];
 
