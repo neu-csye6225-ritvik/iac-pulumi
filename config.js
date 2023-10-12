@@ -6,4 +6,4 @@ module.exports = {
     availabilityZone: "us-east-1",
     vpcName: "myVpcDev",
     igName: "igw"
-};
+}

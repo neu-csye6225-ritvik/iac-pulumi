@@ -1,8 +1,20 @@
 const aws = require("@pulumi/aws");
 const pulumi = require("@pulumi/pulumi");
-const config = require("./config");
+// const config = require("./config");
 
-var id = 0;
+
+const fs = require('fs');
+const yaml = require('js-yaml');
+
+let stackName = pulumi.getStack();
+let configFileName = `Pulumi.${stackName}.yaml`;
+
+
+
+    const config = yaml.load(fs.readFileSync(configFileName, 'utf8'));
+
+
+let id = 0;
 
 const createSubnets = (vpc, type, count) => {
     let subnets = [];
@@ -33,6 +45,7 @@ const createSubnets = (vpc, type, count) => {
 }
 
 const main = async () => {
+
     // Create a VPC
     const vpc = new aws.ec2.Vpc("my-vpc", {
         cidrBlock: config.baseCIDRBlock,
