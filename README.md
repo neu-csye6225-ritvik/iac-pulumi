@@ -8,7 +8,7 @@ Infrastructure as code with pulumi
 4. In each account, create IAM user groups and users with console and arn:aws:iam::aws:policy/ReadOnlyAccess access
 
 
-#AWS CLI and Configure
+#AWS CLI and Configure 
 aws configure --profile 
     set accesskey and secretaccesskey for each profile(dev and demo)
 cat .aws/credentials - check the configuration here
