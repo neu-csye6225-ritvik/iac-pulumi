@@ -6,7 +6,7 @@ Infrastructure as code with pulumi
 2. Create user accounts in the organization(dev, demo)
 3. Login to dev and demo accounts and setup multi-factor authentication
 4. In each account, create IAM user groups and users with console and arn:aws:iam::aws:policy/ReadOnlyAccess access
-5. Prov
+
 
 #AWS CLI and Configure
 aws configure --profile 
