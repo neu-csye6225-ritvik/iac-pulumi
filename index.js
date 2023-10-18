@@ -19,7 +19,7 @@ let id = 0;
 const createSubnets = (vpc, type, count) => {
     let subnets = [];
     let flag = false;
-    if(type==="public"){
+    if (type === "public") {
         flag = true
     }
 
@@ -28,7 +28,7 @@ const createSubnets = (vpc, type, count) => {
     for (let i = 0; i < count; i++) {
         let subnet = new aws.ec2.Subnet(`subnet-${type}-${i}`, {
             vpcId: vpc.id,
-            cidrBlock: `${octets[0]}.${octets[1]}.${id++}.${octets[3]}/24`,
+            cidrBlock: `${octets[0]}.${octets[1]}.${id++}.${octets[3]}/${config.subnetMask}`,
             availabilityZone: `${config.availabilityZone}${String.fromCharCode(97 + i)}`,
             // mapPublicIpOnLaunch: flag,
             tags: {
@@ -115,11 +115,24 @@ const main = async () => {
         ],
     });
 
+    // const ami = aws.ec2.getAmi({
+    //     mostRecent: true,
+    //     filters: [
+    //         {
+    //             name: 'state',
+    //             values: ['available'],
+    //         },
+    //     ],
+    //     owners: ['self'],
+    // })
+
+    // console.log(ami.id);
+
     const ec2Instance = new aws.ec2.Instance("myInstance", {
         // ami: ami.then(img => img.id), // Use the AMI ID from our ami lookup.
-        ami: "ami-027ee83dfd571f502",
+        ami: "ami-0a1d122d87d458cd9",
         instanceType: "t2.micro", // This is the instance type. 
-        keyName: "amiKeypair",
+        keyName: "amiKeypairdemo",
         subnetId: publicSubnets[0].id,
         vpcSecurityGroupIds: [sg.id],
         disableApiTermination: false, // Protect against accidental termination.
@@ -128,10 +141,14 @@ const main = async () => {
             volumeSize: 20, // Root volume size in GB.
             volumeType: "gp2", // Root volume type.
             deleteOnTermination: true, // Delete the root EBS volume on instance termination.
-        }
+        },
+        tags: {
+            Name: `debianEC2`,
+        },
+
     });
 
-    return { vpcId: vpc.id, publicSubnets, privateSubnets, internetGatewayId: internetGateway.id, publicRoute, vpcGatewayAttachment, ec2Instance,sg };
+    return { vpcId: vpc.id, publicSubnets, privateSubnets, internetGatewayId: internetGateway.id, publicRoute, vpcGatewayAttachment, ec2Instance, sg };
 }
 
 exports = main();
