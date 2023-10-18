@@ -131,7 +131,7 @@ const main = async () => {
     const ec2Instance = new aws.ec2.Instance("myInstance", {
         // ami: ami.then(img => img.id), // Use the AMI ID from our ami lookup.
         ami: config.ami,
-        instanceType: config.instanceType, // This is the instance type. 
+        instanceType: config.instance_type, // This is the instance type. 
         keyName: config.keyPair,
         subnetId: publicSubnets[0].id,
         vpcSecurityGroupIds: [sg.id],
