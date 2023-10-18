@@ -138,8 +138,8 @@ const main = async () => {
         disableApiTermination: false, // Protect against accidental termination.
         associatePublicIpAddress: true,
         rootBlockDevice: {
-            volumeSize: 20, // Root volume size in GB.
-            volumeType: "gp2", // Root volume type.
+            volumeSize: config.volumeSize, // Root volume size in GB.
+            volumeType: config.volumeType, // Root volume type.
             deleteOnTermination: true, // Delete the root EBS volume on instance termination.
         },
         tags: {
