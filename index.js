@@ -10,8 +10,7 @@ let stackName = pulumi.getStack();
 let configFileName = `Pulumi.${stackName}.yaml`;
 
 
-
-    const config = yaml.load(fs.readFileSync(configFileName, 'utf8'));
+const config = yaml.load(fs.readFileSync(configFileName, 'utf8'));
 
 
 let id = 0;
@@ -19,22 +18,19 @@ let id = 0;
 
 const createSubnets = (vpc, type, count) => {
     let subnets = [];
+    let flag = false;
+    if (type === "public") {
+        flag = true
+    }
 
-    // const baseCIDR = config.subnetCIDR; // Split the base CIDR
     const octets = config.subnetCIDR.split('.');
-
-    // Parse the third octet as an integer
-    let thirdOctet = parseInt(octets[2]);
 
     for (let i = 0; i < count; i++) {
         let subnet = new aws.ec2.Subnet(`subnet-${type}-${i}`, {
             vpcId: vpc.id,
-            cidrBlock: `${octets[0]}.${octets[1]}.${id++}.${octets[3]}/24`,
-            // cidrBlock: `10.0.${++id}.0/24`,
-            // cidrBlock: pulumi.interpolate`${baseCIDR.apply(base =>
-            //     base.map((part, index) =>
-            //         (index === 2) ? `${++id}.0` : part))}/24`,
+            cidrBlock: `${octets[0]}.${octets[1]}.${id++}.${octets[3]}/${config.subnetMask}`,
             availabilityZone: `${config.availabilityZone}${String.fromCharCode(97 + i)}`,
+            // mapPublicIpOnLaunch: flag,
             tags: {
                 Name: `subnet-${type}-${i}`,
                 Type: type
@@ -76,6 +72,7 @@ const main = async () => {
     // Create public route tables
     const publicRouteTable = new aws.ec2.RouteTable("public-route-table", {
         vpcId: vpc.id,
+        // gatewayId: internetGateway.id
     });
 
     // Create private route tables
@@ -106,7 +103,53 @@ const main = async () => {
         });
     }
 
-    return { vpcId: vpc.id, publicSubnets, privateSubnets, internetGatewayId: internetGateway.id, publicRoute, vpcGatewayAttachment };
+    // Create an AWS resource (Security Group)
+    let sg = new aws.ec2.SecurityGroup("web-secgrp", {
+        vpcId: vpc.id,
+        description: "Enable HTTP access",
+        ingress: [
+            { protocol: "tcp", fromPort: 22, toPort: 22, cidrBlocks: ["0.0.0.0/0"] },
+            { protocol: "tcp", fromPort: 80, toPort: 80, cidrBlocks: ["0.0.0.0/0"] },
+            { protocol: "tcp", fromPort: 443, toPort: 443, cidrBlocks: ["0.0.0.0/0"] },
+            { protocol: "tcp", fromPort: 7799, toPort: 7799, cidrBlocks: ["0.0.0.0/0"] }
+        ],
+    });
+
+    // const ami = aws.ec2.getAmi({
+    //     mostRecent: true,
+    //     filters: [
+    //         {
+    //             name: 'state',
+    //             values: ['available'],
+    //         },
+    //     ],
+    //     owners: ['self'],
+    // })
+
+    // console.log(ami.id);
+
+    const ec2Instance = new aws.ec2.Instance("myInstance", {
+        // ami: ami.then(img => img.id), // Use the AMI ID from our ami lookup.
+        ami: "ami-0a1d122d87d458cd9",
+        instanceType: "t2.micro", // This is the instance type. 
+        keyName: "amiKeypairdemo",
+        subnetId: publicSubnets[0].id,
+        vpcSecurityGroupIds: [sg.id],
+        disableApiTermination: false, // Protect against accidental termination.
+        associatePublicIpAddress: true,
+        rootBlockDevice: {
+            volumeSize: 20, // Root volume size in GB.
+            volumeType: "gp2", // Root volume type.
+            deleteOnTermination: true, // Delete the root EBS volume on instance termination.
+        },
+        tags: {
+            Name: `debianEC2`,
+        },
+
+    });
+
+    return { vpcId: vpc.id, publicSubnets, privateSubnets, internetGatewayId: internetGateway.id, publicRoute, vpcGatewayAttachment, ec2Instance, sg };
 }
 
 exports = main();
+
