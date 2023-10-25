@@ -130,7 +130,7 @@ const main = async () => {
 
     // Create a new parameter group
     const rdsParameterGroup = new aws.rds.ParameterGroup("pg", {
-        family: "postgres15",
+        family: config.rdsFamily,
         parameters: [
             { name: "client_encoding", value: "UTF8", }
         ],
@@ -146,21 +146,21 @@ const main = async () => {
     // Create a new RDS instance
     const rdsInstance = new aws.rds.Instance("rds-instance", {
 
-        engine: "postgres",
-        engineVersion: "15",
-        instanceClass: "db.t3.micro",
-        allocatedStorage: 20,
+        engine: config.engine,
+        engineVersion: config.engineVersion,
+        instanceClass: config.instanceClass,
+        allocatedStorage: config.allocatedStorage,
         // name: "rdsDbInstance",
-        dbName: "csye6225", //database name
-        username: "webapp",
-        password: "postgres",
+        dbName: config.dbName, //database name
+        username: config.username,
+        password: config.password,
         parameterGroupName: rdsParameterGroup.name,
         vpcSecurityGroupIds: [securityGroup.id],
         skipFinalSnapshot: true,
         dbSubnetGroupName: dbSubnetGroup.name,
         publiclyAccessible: false,
         multiAz: false,
-        identifier: "csye6225",//name of the rds instance
+        identifier: config.identifier,//name of the rds instance
 
     });
 
@@ -180,7 +180,7 @@ const main = async () => {
         echo "DB_PORT=5432" >> .env
         echo "APP_PORT=7799" >> .env
         echo "DB_HOSTNAME=${rdsInstance.address}" >> .env
-        echo "DB_PASSWORD=postgres" >> .env
+        echo "DB_PASSWORD=${config.password}" >> .env
         `,
         ami: config.ami,
         instanceType: config.instance_type, // This is the instance type. 
