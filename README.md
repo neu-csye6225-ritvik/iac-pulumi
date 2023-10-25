@@ -29,3 +29,12 @@ pulumi new or pulumi new --force
 
 
 
+= base64encode(templatefile("${path.module}/userdata.sh", {
+    DB_USER         = rds
+    DB_NAME         = `${aws_db_instance.db_instance.db_name}`
+    DB_PORT         = `${var.db_port}`
+    APP_PORT        = `7070`
+    DB_HOSTNAME     = `${aws_db_instance.db_instance.address}`
+    DB_PASSWORD     = `${var.db_password}`
+    AWS_BUCKET_NAME = `${aws_s3_bucket.s3_bucket.bucket}`
+  }))
