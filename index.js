@@ -9,12 +9,9 @@ const yaml = require('js-yaml');
 let stackName = pulumi.getStack();
 let configFileName = `Pulumi.${stackName}.yaml`;
 
-
 const config = yaml.load(fs.readFileSync(configFileName, 'utf8'));
 
-
 let id = 0;
-
 
 const createSubnets = (vpc, type, count) => {
     let subnets = [];
@@ -42,7 +39,6 @@ const createSubnets = (vpc, type, count) => {
 }
 
 const main = async () => {
-
     // Create a VPC
     const vpc = new aws.ec2.Vpc("my-vpc", {
         cidrBlock: config.baseCIDRBlock,
@@ -50,13 +46,10 @@ const main = async () => {
             Name: config.vpcName,
         },
     });
-
     // Create public subnets
     const publicSubnets = createSubnets(vpc, 'public', config.numOfPubSubnets);
-
     // Create private subnets
     const privateSubnets = createSubnets(vpc, 'private', config.numOfPriSubnets);
-
     // Create an internet gateway and attach it to the VPC
     const internetGateway = new aws.ec2.InternetGateway("igw", {
         tags: {
@@ -102,34 +95,93 @@ const main = async () => {
             routeTableId: privateRouteTable.id,
         });
     }
-
-    // Create an AWS resource (Security Group)
-    let sg = new aws.ec2.SecurityGroup("web-secgrp", {
+     // Create an AWS resource (Security Group) to attach to ec2
+     let sg = new aws.ec2.SecurityGroup("sgEc2", {
+        name:  "ec2-rds-1",
         vpcId: vpc.id,
-        description: "Enable HTTP access",
+        description: "Application Security Group",
         ingress: [
             { protocol: "tcp", fromPort: 22, toPort: 22, cidrBlocks: ["0.0.0.0/0"] },
             { protocol: "tcp", fromPort: 80, toPort: 80, cidrBlocks: ["0.0.0.0/0"] },
             { protocol: "tcp", fromPort: 443, toPort: 443, cidrBlocks: ["0.0.0.0/0"] },
             { protocol: "tcp", fromPort: 7799, toPort: 7799, cidrBlocks: ["0.0.0.0/0"] }
         ],
+        egress: [
+            { protocol: "-1", fromPort: 0, toPort: 0, cidrBlocks: ["0.0.0.0/0"] }
+        ],
+        tags: {
+            Name: "ec2-rds-1",
+        },
+        
     });
 
-    // const ami = aws.ec2.getAmi({
-    //     mostRecent: true,
-    //     filters: [
-    //         {
-    //             name: 'state',
-    //             values: ['available'],
-    //         },
-    //     ],
-    //     owners: ['self'],
-    // })
+    // Create a new security group that allows TCP traffic of above security group
+    const securityGroup = new aws.ec2.SecurityGroup("sgRds", {
+        vpcId: vpc.id,
+        name: "rds-ec2-1",
+        description: "Database Security Group",
+        ingress: [
+            { protocol: "tcp", fromPort: 5432, toPort: 5432, securityGroups: [sg.id] },
+        ],
+        tags: {
+            Name: "rds-ec2-1",
+        },
+    });
 
-    // console.log(ami.id);
+    // Create a new parameter group
+    const rdsParameterGroup = new aws.rds.ParameterGroup("pg", {
+        family: "postgres15",
+        parameters: [
+            { name: "client_encoding", value: "UTF8", }
+        ],
+        description: "RDS parameter group"
+    });
 
-    const ec2Instance = new aws.ec2.Instance("myInstance", {
+    // Create an RDS Subnet group
+    const dbSubnetGroup = new aws.rds.SubnetGroup("db-subnet-group", {
+        subnetIds: [privateSubnets[0].id,
+        privateSubnets[1].id,],  // Assuming your VPC has at least one subnet
+    });
+
+    // Create a new RDS instance
+    const rdsInstance = new aws.rds.Instance("rds-instance", {
+
+        engine: "postgres",
+        engineVersion: "15",
+        instanceClass: "db.t3.micro",
+        allocatedStorage: 20,
+        // name: "rdsDbInstance",
+        dbName: "csye6225", //database name
+        username: "webapp",
+        password: "postgres",
+        parameterGroupName: rdsParameterGroup.name,
+        vpcSecurityGroupIds: [securityGroup.id],
+        skipFinalSnapshot: true,
+        dbSubnetGroupName: dbSubnetGroup.name,
+        publiclyAccessible: false,
+        multiAz: false,
+        identifier: "csye6225",//name of the rds instance
+
+    });
+
+ 
+
+    const ec2Instance = new aws.ec2.Instance("ec2-instance", {
         // ami: ami.then(img => img.id), // Use the AMI ID from our ami lookup.
+        // userDataReplaceOnChange: 
+        // userData: Buffer.from(userData).toString("base64"),
+        userData: pulumi.interpolate `#!/bin/bash
+        cd /opt/webappuser/webapp
+        touch .env
+    
+        echo NODE_ENV=production >> .env
+        echo "DB_USER=${rdsInstance.username}" >> .env
+        echo "DB_NAME=${rdsInstance.dbName}" >> .env
+        echo "DB_PORT=5432" >> .env
+        echo "APP_PORT=7799" >> .env
+        echo "DB_HOSTNAME=${rdsInstance.address}" >> .env
+        echo "DB_PASSWORD=postgres" >> .env
+        `,
         ami: config.ami,
         instanceType: config.instance_type, // This is the instance type. 
         keyName: config.keyPair,
@@ -137,6 +189,8 @@ const main = async () => {
         vpcSecurityGroupIds: [sg.id],
         disableApiTermination: false, // Protect against accidental termination.
         associatePublicIpAddress: true,
+        userDataReplaceOnChange:true,
+
         rootBlockDevice: {
             volumeSize: config.volumeSize, // Root volume size in GB.
             volumeType: config.volumeType, // Root volume type.
@@ -148,7 +202,8 @@ const main = async () => {
 
     });
 
-    return { vpcId: vpc.id, publicSubnets, privateSubnets, internetGatewayId: internetGateway.id, publicRoute, vpcGatewayAttachment, ec2Instance, sg };
+
+    return { vpcId: vpc.id, publicSubnets, privateSubnets, internetGatewayId: internetGateway.id, publicRoute, vpcGatewayAttachment, ec2Instance, sg, rdsInstance, rdsParameterGroup };
 }
 
 exports = main();
