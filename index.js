@@ -1,5 +1,6 @@
 const aws = require("@pulumi/aws");
 const pulumi = require("@pulumi/pulumi");
+const route53 = require("@pulumi/aws/route53");
 // const config = require("./config");
 
 
@@ -95,9 +96,9 @@ const main = async () => {
             routeTableId: privateRouteTable.id,
         });
     }
-     // Create an AWS resource (Security Group) to attach to ec2
-     let sg = new aws.ec2.SecurityGroup("sgEc2", {
-        name:  "ec2-rds-1",
+    // Create an AWS resource (Security Group) to attach to ec2
+    let sg = new aws.ec2.SecurityGroup("sgEc2", {
+        name: "ec2-rds-1",
         vpcId: vpc.id,
         description: "Application Security Group",
         ingress: [
@@ -112,7 +113,7 @@ const main = async () => {
         tags: {
             Name: "ec2-rds-1",
         },
-        
+
     });
 
     // Create a new security group that allows TCP traffic of above security group
@@ -164,14 +165,41 @@ const main = async () => {
 
     });
 
- 
+    // Create an IAM role
+    const role = new aws.iam.Role("role", {
+        assumeRolePolicy: JSON.stringify({
+            Version: "2012-10-17",
+            Statement: [
+                {
+                    Action: "sts:AssumeRole",
+                    Principal: {
+                        Service: "ec2.amazonaws.com"
+                    },
+                    Effect: "Allow",
+                    Sid: ""
+                }
+            ]
+        })
+    });
+
+    // Attach CloudWatchAgentServerPolicy policy to IAM role
+    new aws.iam.RolePolicyAttachment("rolePolicyAttachment", {
+        role: role.name,
+        policyArn: "arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy"
+    });
+
+    // // Create an IAM instance profile for the role
+    const instanceProfile = new aws.iam.InstanceProfile("myInstanceProfile", {
+        role: role.name,
+    });
 
     const ec2Instance = new aws.ec2.Instance("ec2-instance", {
         // ami: ami.then(img => img.id), // Use the AMI ID from our ami lookup.
         // userDataReplaceOnChange: 
         // userData: Buffer.from(userData).toString("base64"),
-        userData: pulumi.interpolate `#!/bin/bash
+        userData: pulumi.interpolate`#!/bin/bash
         cd /opt/webappuser/webapp
+
         touch .env
     
         echo NODE_ENV=production >> .env
@@ -181,7 +209,17 @@ const main = async () => {
         echo "APP_PORT=7799" >> .env
         echo "DB_HOSTNAME=${rdsInstance.address}" >> .env
         echo "DB_PASSWORD=${config.password}" >> .env
+
+        sudo systemctl restart webapp
+        
+        sudo /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl \
+            -a fetch-config \
+            -m ec2 \
+            -c file:/opt/webappuser/webapp/cloudwatch-config.json \
+            -s
+
         `,
+
         ami: config.ami,
         instanceType: config.instance_type, // This is the instance type. 
         keyName: config.keyPair,
@@ -189,7 +227,9 @@ const main = async () => {
         vpcSecurityGroupIds: [sg.id],
         disableApiTermination: false, // Protect against accidental termination.
         associatePublicIpAddress: true,
-        userDataReplaceOnChange:true,
+        userDataReplaceOnChange: true,
+
+        iamInstanceProfile: instanceProfile, // IAM instance profile
 
         rootBlockDevice: {
             volumeSize: config.volumeSize, // Root volume size in GB.
@@ -202,8 +242,20 @@ const main = async () => {
 
     });
 
+    const hostedZoneId = "Z05028562PG0P2UYTMROP";
 
-    return { vpcId: vpc.id, publicSubnets, privateSubnets, internetGatewayId: internetGateway.id, publicRoute, vpcGatewayAttachment, ec2Instance, sg, rdsInstance, rdsParameterGroup };
+    const demoArecord = new route53.Record("aRecord", {
+        zoneId: hostedZoneId,
+        name: "demo.ritvikparamkusham.me",
+        type: "A",
+        ttl: 300,
+        records: [ec2Instance.publicIp], // Assumes ec2Instance has a public IP assigned
+        dependsOn: [ec2Instance],
+      });
+
+
+    return { vpcId: vpc.id, publicSubnets, privateSubnets, internetGatewayId: internetGateway.id, publicRoute, vpcGatewayAttachment,
+             ec2Instance, sg, rdsInstance, rdsParameterGroup, demoArecord };
 }
 
 exports = main();
