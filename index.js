@@ -210,8 +210,9 @@ const main = async () => {
         echo "DB_HOSTNAME=${rdsInstance.address}" >> .env
         echo "DB_PASSWORD=${config.password}" >> .env
 
+        sudo systemctl daemon-reload
         sudo systemctl restart webapp
-        
+
         sudo /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl \
             -a fetch-config \
             -m ec2 \
