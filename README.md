@@ -50,3 +50,12 @@ pulumi new or pulumi new --force
     3.  Launch Template for EC2 instance
     4.  Target Groups
 
+= base64encode(templatefile("${path.module}/userdata.sh", {
+    DB_USER         = rds
+    DB_NAME         = `${aws_db_instance.db_instance.db_name}`
+    DB_PORT         = `${var.db_port}`
+    APP_PORT        = `7070`
+    DB_HOSTNAME     = `${aws_db_instance.db_instance.address}`
+    DB_PASSWORD     = `${var.db_password}`
+    AWS_BUCKET_NAME = `${aws_s3_bucket.s3_bucket.bucket}`
+  }))

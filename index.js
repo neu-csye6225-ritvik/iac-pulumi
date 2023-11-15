@@ -399,7 +399,7 @@ const main = async () => {
       );
 
     const hostedZoneId = config.hostedZoneId;
-
+    
 
     const demoArecord = new route53.Record("aRecord", {
         zoneId: hostedZoneId,
