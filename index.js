@@ -102,12 +102,14 @@ const main = async () => {
         name: "lb-ec2",
         description: "Load Balancer Security Group",
         ingress: [
-            { protocol: "tcp", fromPort: 80, toPort: 80, 
-            cidrBlocks: ["0.0.0.0/0"]
-        },
-            { protocol: "tcp", fromPort: 443, toPort: 443, 
-            cidrBlocks: ["0.0.0.0/0"]
-         }
+            {
+                protocol: "tcp", fromPort: 80, toPort: 80,
+                cidrBlocks: ["0.0.0.0/0"]
+            },
+            {
+                protocol: "tcp", fromPort: 443, toPort: 443,
+                cidrBlocks: ["0.0.0.0/0"]
+            }
         ],
         egress: [
             { protocol: "-1", fromPort: 0, toPort: 0, cidrBlocks: ["0.0.0.0/0"] }
@@ -123,12 +125,16 @@ const main = async () => {
         vpcId: vpc.id,
         description: "Application Security Group",
         ingress: [
-            { protocol: "tcp", fromPort: 22, toPort: 22,
-            // cidrBlocks: ["0.0.0.0/0"],
-            securityGroups: [lbSecGrp.id]},
-            { protocol: "tcp", fromPort: 7799, toPort: 7799, 
-            // cidrBlocks: ["0.0.0.0/0"],
-            securityGroups: [lbSecGrp.id] }
+            {
+                protocol: "tcp", fromPort: 22, toPort: 22,
+                // cidrBlocks: ["0.0.0.0/0"],
+                securityGroups: [lbSecGrp.id]
+            },
+            {
+                protocol: "tcp", fromPort: 7799, toPort: 7799,
+                // cidrBlocks: ["0.0.0.0/0"],
+                securityGroups: [lbSecGrp.id]
+            }
         ],
         egress: [
             { protocol: "-1", fromPort: 0, toPort: 0, cidrBlocks: ["0.0.0.0/0"] }
@@ -284,7 +290,7 @@ const main = async () => {
         name: "csye6225-lb-alb-tg",
         port: 7799,//application port
         targetType: "instance",
-        
+
         protocol: "HTTP",
         vpcId: vpc.id,
         healthCheck: {
@@ -307,21 +313,6 @@ const main = async () => {
         }],
     });
 
-    // const autoScalingGroup = new aws.autoscaling.Group("autoScalingGroup", {
-    //     vpcZoneIdentifiers: pulumi.output(publicSubnets).apply(ids => ids || []),
-    //     maxSize: 3,
-    //     minSize: 1,
-    //     desiredCapacity: 1,
-    //     forceDelete: true,
-    //     defaultCooldown: 60,
-    //     launchTemplate: {
-    //         id: ec2LaunchTemplate.id,
-    //         version: "$Latest",
-    //     },
-        
-    //     targetGroupArns: [targetGroup.arn]
-    // });
-
     const autoScalingGroup = new aws.autoscaling.Group("asg", {
         name: "asg_launch_config",
         maxSize: 3,
@@ -331,20 +322,20 @@ const main = async () => {
         defaultCooldown: 60,
         vpcZoneIdentifiers: pulumi.output(publicSubnets).apply(ids => ids || []),
         tags: [
-          {
-            key: "Name",
-            value: "autoScalingGroup",
-            propagateAtLaunch: true,
-          },
+            {
+                key: "Name",
+                value: "asg_launch_config",
+                propagateAtLaunch: true,
+            },
         ],
         launchTemplate: {
-          id: ec2LaunchTemplate.id,
-          version: "$Latest",
+            id: ec2LaunchTemplate.id,
+            version: "$Latest",
         },
         dependsOn: [targetGroup],
         targetGroupArns: [targetGroup.arn],
-      });
-   
+    });
+
     const scaleUpPolicy = new aws.autoscaling.Policy("scaleUpPolicy", {
         autoscalingGroupName: autoScalingGroup.name,
         scalingAdjustment: 1,
@@ -354,49 +345,49 @@ const main = async () => {
         cooldownDescription: "Scale up policy when average CPU usage is above 5%",
         policyType: "SimpleScaling",
         scalingTargetId: autoScalingGroup.id,
-      });
-   
-      const scaleDownPolicy = new aws.autoscaling.Policy("scaleDownPolicy", {
+    });
+
+    const scaleDownPolicy = new aws.autoscaling.Policy("scaleDownPolicy", {
         autoscalingGroupName: autoScalingGroup.name,
         scalingAdjustment: -1,
         cooldown: 60,
         adjustmentType: "ChangeInCapacity",
         autocreationCooldown: 60,
         cooldownDescription:
-          "Scale down policy when average CPU usage is below 3%",
+            "Scale down policy when average CPU usage is below 3%",
         policyType: "SimpleScaling",
         scalingTargetId: autoScalingGroup.id,
-      });
+    });
 
-      const cpuUtilizationAlarmHigh = new aws.cloudwatch.MetricAlarm(
+    const cpuUtilizationAlarmHigh = new aws.cloudwatch.MetricAlarm(
         "cpuUtilizationAlarmHigh",
         {
-          comparisonOperator: "GreaterThanThreshold",
-          evaluationPeriods: 1,
-          metricName: "CPUUtilization",
-          namespace: "AWS/EC2",
-          period: 60,
-          threshold: 5,
-          statistic: "Average",
-          alarmActions: [scaleUpPolicy.arn],
-          dimensions: { AutoScalingGroupName: autoScalingGroup.name },
+            comparisonOperator: "GreaterThanThreshold",
+            evaluationPeriods: 1,
+            metricName: "CPUUtilization",
+            namespace: "AWS/EC2",
+            period: 60,
+            threshold: 5,
+            statistic: "Average",
+            alarmActions: [scaleUpPolicy.arn],
+            dimensions: { AutoScalingGroupName: autoScalingGroup.name },
         }
-      );
-   
-      const cpuUtilizationAlarmLow = new aws.cloudwatch.MetricAlarm(
+    );
+
+    const cpuUtilizationAlarmLow = new aws.cloudwatch.MetricAlarm(
         "cpuUtilizationAlarmLow",
         {
-          comparisonOperator: "LessThanThreshold",
-          evaluationPeriods: 1,
-          metricName: "CPUUtilization",
-          namespace: "AWS/EC2",
-          period: 60,
-          statistic: "Average",
-          threshold: 3,
-          alarmActions: [scaleDownPolicy.arn],
-          dimensions: { AutoScalingGroupName: autoScalingGroup.name },
+            comparisonOperator: "LessThanThreshold",
+            evaluationPeriods: 1,
+            metricName: "CPUUtilization",
+            namespace: "AWS/EC2",
+            period: 60,
+            statistic: "Average",
+            threshold: 3,
+            alarmActions: [scaleDownPolicy.arn],
+            dimensions: { AutoScalingGroupName: autoScalingGroup.name },
         }
-      );
+    );
 
     const hostedZoneId = config.hostedZoneId;
 
@@ -410,6 +401,64 @@ const main = async () => {
             zoneId: lb.zoneId,
             evaluateTargetHealth: true,
         }],
+    });
+
+
+    const exampleTopic = new aws.sns.Topic("exampleTopic", {});
+
+    const exampleRole = new aws.iam.Role("exampleRole", {
+        assumeRolePolicy: JSON.stringify({
+            Version: "2012-10-17",
+            Statement: [{
+                Action: "sts:AssumeRole",
+                Principal: {
+                    Service: "lambda.amazonaws.com",
+                },
+                Effect: "Allow",
+                Sid: "",
+            }],
+        }),
+    });
+
+    new aws.iam.RolePolicyAttachment("exampleRolePolicyAttachment", {
+        role: exampleRole.name,
+        policyArn: "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole",
+    });
+
+    // Create an AWS Lambda function
+    const lambda = new aws.lambda.Function("mylambda", {
+        runtime: aws.lambda.NodeJS12dXRuntime,
+        code: new pulumi.asset.AssetArchive({
+            ".": new pulumi.asset.FileArchive("./app"),
+        }),
+        handler: "index.handler",
+    });
+
+    const exampleFunction = new aws.lambda.Function("exampleFunction", {
+        code: new pulumi.asset.AssetArchive({
+            "index.js": new pulumi.asset.StringAsset(
+                `exports.handler = function(event, context, callback) {
+                    console.log('Received Message:', JSON.stringify(event));
+        callback(null, "Hello, World!");
+    };`,
+            ),
+        }),
+        handler: "index.handler",
+        role: exampleRole.arn,
+        runtime: "nodejs18.x",
+    });
+
+    new aws.lambda.Permission("examplePermission", {
+        action: "lambda:InvokeFunction",
+        function: exampleFunction.name,
+        principal: "sns.amazonaws.com",
+        sourceArn: exampleTopic.arn,
+    });
+
+    new aws.sns.TopicSubscription("exampleTopicSubscription_lambda", {
+        endpoint: exampleFunction.arn,
+        protocol: "lambda",
+        topic: exampleTopic.arn,
     });
 
     // return {
