@@ -1,8 +1,8 @@
 const aws = require("@pulumi/aws");
 const pulumi = require("@pulumi/pulumi");
 const route53 = require("@pulumi/aws/route53");
-// const config = require("./config");
-
+// const config = require("./lambda");
+// const gcp = require("@pulumi/gcp");
 
 const fs = require('fs');
 const yaml = require('js-yaml');
@@ -127,8 +127,8 @@ const main = async () => {
         ingress: [
             {
                 protocol: "tcp", fromPort: 22, toPort: 22,
-                // cidrBlocks: ["0.0.0.0/0"],
-                securityGroups: [lbSecGrp.id]
+                cidrBlocks: ["0.0.0.0/0"]
+                // securityGroups: [lbSecGrp.id]
             },
             {
                 protocol: "tcp", fromPort: 7799, toPort: 7799,
@@ -194,6 +194,56 @@ const main = async () => {
 
     });
 
+
+
+    const snsTopic = new aws.sns.Topic("snsTopicAmi", {});
+
+    const lambdaRole = new aws.iam.Role("lambdaRole", {
+        assumeRolePolicy: JSON.stringify({
+            Version: "2012-10-17",
+            Statement: [{
+                Action: "sts:AssumeRole",
+                Principal: {
+                    Service: "lambda.amazonaws.com",
+                },
+                Effect: "Allow",
+                Sid: "",
+            }],
+        }),
+    });
+
+    new aws.iam.RolePolicyAttachment("lambdaRolePolicyAttachment", {
+        role: lambdaRole.name,
+        policyArn: "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole",
+    });
+
+    // // Create an AWS Lambda function
+
+
+    const lambdaFunction = new aws.lambda.Function("lambdaFunction", {
+        code: new pulumi.asset.AssetArchive({
+            ".": new pulumi.asset.FileArchive("./lambda"),
+        }),
+        handler: "index.handler",
+        role: lambdaRole.arn,
+        runtime: "nodejs18.x",
+    });
+
+    new aws.lambda.Permission("lambdaPermission", {
+        action: "lambda:InvokeFunction",
+        function: lambdaFunction.name,
+        principal: "sns.amazonaws.com",
+        sourceArn: snsTopic.arn,
+    });
+
+    new aws.sns.TopicSubscription("snsTopicSubscription_lambda", {
+        endpoint: lambdaFunction.arn,
+        protocol: "lambda",
+        topic: snsTopic.arn,
+    });
+
+
+
     // Create an IAM role
     const role = new aws.iam.Role("role", {
         assumeRolePolicy: JSON.stringify({
@@ -222,8 +272,17 @@ const main = async () => {
         role: role.name,
     });
 
+
     // User data script
     const userDataScript = pulumi.interpolate`#!/bin/bash
+    
+    sudo aws configure set aws_access_key_id AKIAQSAFOW3OUIFYXY2Z --profile demo
+    sudo aws configure set aws_secret_access_key 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 --profile demo
+    
+    sudo cp -r .aws /opt/webappuser
+
+    sudo chown -R webappuser:webappgroup /opt/webappuser/.aws
+
     cd /opt/webappuser/webapp
 
     touch .env
@@ -234,6 +293,13 @@ const main = async () => {
     echo "APP_PORT=7799" >> .env
     echo "DB_HOSTNAME=${rdsInstance.address}" >> .env
     echo "DB_PASSWORD=${config.password}" >> .env
+
+    echo "SNSTOPICARN=${snsTopic.arn}" >> .env
+    echo "AWS_REGION=us-east-1" >> .env
+    echo "AWS_PROFILE=demo" >> .env
+    echo "MAILGUN_API=e8500bfb35a6d00230540dada439281e-5d2b1caa-884ab131" >> .env
+
+
     sudo systemctl daemon-reload
     sudo systemctl restart webapp
     sudo /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl \
@@ -244,9 +310,7 @@ const main = async () => {
 `;
 
     const ec2LaunchTemplate = new aws.ec2.LaunchTemplate("ec2launchTemp", {
-
         imageId: config.ami,
-
         instanceType: config.instance_type,
         keyName: config.keyPair,
         iamInstanceProfile: { name: instanceProfile.name },
@@ -269,6 +333,7 @@ const main = async () => {
                 deleteOnTermination: true, // Delete the root EBS volume on instance termination.
             },
         }],
+
 
         userData: userDataScript.apply((data) => Buffer.from(data).toString("base64")),
     });
@@ -314,8 +379,8 @@ const main = async () => {
     });
 
     const autoScalingGroup = new aws.autoscaling.Group("asg", {
-        name: "asg_launch_config",
-        maxSize: 3,
+        name: "asg_launch_config_ami",
+        maxSize: 4,
         minSize: 1,
         desiredCapacity: 1,
         forceDelete: true,
@@ -403,70 +468,32 @@ const main = async () => {
         }],
     });
 
+    // Create a Google Cloud storage bucket
+    // let bucket = new gcp.storage.Bucket("my-bucket");
+    // Create a GCP resource (Storage Bucket)
+    // const bucket = new gcp.storage.Bucket("my-bucket-pulumi", {
+    //     location: "US"
+    // });
 
-    const exampleTopic = new aws.sns.Topic("exampleTopic", {});
+    // // Create a service account
+    // const serviceAccount = new gcp.serviceaccount.Account("serviceAccount", {
+    //     accountId: "service-account-id",
+    //     displayName: "Service Account",
+    // });
 
-    const exampleRole = new aws.iam.Role("exampleRole", {
-        assumeRolePolicy: JSON.stringify({
-            Version: "2012-10-17",
-            Statement: [{
-                Action: "sts:AssumeRole",
-                Principal: {
-                    Service: "lambda.amazonaws.com",
-                },
-                Effect: "Allow",
-                Sid: "",
-            }],
-        }),
-    });
+    // // Create access keys for the service account
+    // const serviceAccountKey = new gcp.serviceaccount.Key("mykey", {
+    //     serviceAccountId: serviceAccount.name,
+    //     publicKeyType: "TYPE_X509_PEM_FILE",
+    // });
+    // let serviceAccountKey = new gcp.serviceAccount.Key("my-service-account-key", { serviceAccountId: serviceAccount.accountId });
 
-    new aws.iam.RolePolicyAttachment("exampleRolePolicyAttachment", {
-        role: exampleRole.name,
-        policyArn: "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole",
-    });
+    // Export the bucket name, service account email, and service account key
+    // export let bucketName = bucket.name;
+    // export let serviceAccountEmail = serviceAccount.email;
+    // export let serviceAccountKey = serviceAccountKey.privateKey;
 
-    // Create an AWS Lambda function
-    const lambda = new aws.lambda.Function("mylambda", {
-        runtime: aws.lambda.NodeJS12dXRuntime,
-        code: new pulumi.asset.AssetArchive({
-            ".": new pulumi.asset.FileArchive("./app"),
-        }),
-        handler: "index.handler",
-    });
-
-    const exampleFunction = new aws.lambda.Function("exampleFunction", {
-        code: new pulumi.asset.AssetArchive({
-            "index.js": new pulumi.asset.StringAsset(
-                `exports.handler = function(event, context, callback) {
-                    console.log('Received Message:', JSON.stringify(event));
-        callback(null, "Hello, World!");
-    };`,
-            ),
-        }),
-        handler: "index.handler",
-        role: exampleRole.arn,
-        runtime: "nodejs18.x",
-    });
-
-    new aws.lambda.Permission("examplePermission", {
-        action: "lambda:InvokeFunction",
-        function: exampleFunction.name,
-        principal: "sns.amazonaws.com",
-        sourceArn: exampleTopic.arn,
-    });
-
-    new aws.sns.TopicSubscription("exampleTopicSubscription_lambda", {
-        endpoint: exampleFunction.arn,
-        protocol: "lambda",
-        topic: exampleTopic.arn,
-    });
-
-    // return {
-    //     vpcId: vpc.id, publicSubnets, privateSubnets, internetGatewayId: internetGateway.id, publicRoute, vpcGatewayAttachment,
-    //     rdsInstance, rdsParameterGroup, demoArecord, ec2LaunchTemplate
-    // };
 }
 
 
 exports = main();
-
