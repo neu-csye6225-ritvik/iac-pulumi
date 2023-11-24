@@ -1,8 +1,9 @@
 const aws = require("@pulumi/aws");
 const pulumi = require("@pulumi/pulumi");
 const route53 = require("@pulumi/aws/route53");
+const path = require("path");
 // const config = require("./lambda");
-// const gcp = require("@pulumi/gcp");
+const gcp = require("@pulumi/gcp");
 
 const fs = require('fs');
 const yaml = require('js-yaml');
@@ -195,9 +196,41 @@ const main = async () => {
     });
 
 
+    // Create a Google Cloud storage bucket
+    const bucket = new gcp.storage.Bucket("my-bucket-check", {
+        location: "US"
+    });
 
+    // // Create a service account
+    const serviceAccount = new gcp.serviceaccount.Account("serviceAccount", {
+        accountId: "service-account-id",
+        displayName: "Service Account",
+    });
+
+    // // Create access keys for the service account
+    const serviceAccountKey = new gcp.serviceaccount.Key("serviceKey", {
+        serviceAccountId: serviceAccount.name,
+        publicKeyType: "TYPE_X509_PEM_FILE",
+    });
+
+    // // Give the service account the required permissions
+    const bucketAdminBinding = new gcp.projects.IAMBinding("bucketAdminBinding", {
+        members: [pulumi.interpolate`serviceAccount:${serviceAccount.email}`],
+        role: "roles/storage.admin",  // admin role for managing storage buckets
+        project: config.gcpproject,  // assuming the project is configured in Pulumi
+    });
+
+    // Export the serviceAccountKey, possibly write it to a JSON file and use the path as GOOGLE_APPLICATION_CREDENTIALS
+    const keyFilePath = pulumi.all([serviceAccountKey.privateKey, serviceAccountKey.name]).apply(([privateKey, fileName]) => {
+        const filePath = path.join(config.__dirname, `fileName.json`);
+        fs.writeFileSync(filePath, privateKey);
+        return filePath;
+    });
+
+    //create SNS topic
     const snsTopic = new aws.sns.Topic("snsTopicAmi", {});
 
+    //lamabda role
     const lambdaRole = new aws.iam.Role("lambdaRole", {
         assumeRolePolicy: JSON.stringify({
             Version: "2012-10-17",
@@ -218,8 +251,6 @@ const main = async () => {
     });
 
     // // Create an AWS Lambda function
-
-
     const lambdaFunction = new aws.lambda.Function("lambdaFunction", {
         code: new pulumi.asset.AssetArchive({
             ".": new pulumi.asset.FileArchive("./lambda"),
@@ -227,7 +258,17 @@ const main = async () => {
         handler: "index.handler",
         role: lambdaRole.arn,
         runtime: "nodejs18.x",
+        environment: {
+            // Add environment variables for GCP access keys or configurations
+            variables: {
+                "GCP_SERVICE_ACCOUNT_KEY": serviceAccountKey.privateKey, // Example: Pass the private key to Lambda
+                "GCP_PROJECT_ID": gcp.config.project, // Example: Pass the GCP Project ID to Lambda
+                "GOOGLE_STORAGE_BUCKET": bucket.url,
+                "GOOGLE_STORAGE_BUCKET_NAME": bucket.name,
+            }
+        },
     });
+
 
     new aws.lambda.Permission("lambdaPermission", {
         action: "lambda:InvokeFunction",
@@ -468,24 +509,6 @@ const main = async () => {
         }],
     });
 
-    // Create a Google Cloud storage bucket
-    // let bucket = new gcp.storage.Bucket("my-bucket");
-    // Create a GCP resource (Storage Bucket)
-    // const bucket = new gcp.storage.Bucket("my-bucket-pulumi", {
-    //     location: "US"
-    // });
-
-    // // Create a service account
-    // const serviceAccount = new gcp.serviceaccount.Account("serviceAccount", {
-    //     accountId: "service-account-id",
-    //     displayName: "Service Account",
-    // });
-
-    // // Create access keys for the service account
-    // const serviceAccountKey = new gcp.serviceaccount.Key("mykey", {
-    //     serviceAccountId: serviceAccount.name,
-    //     publicKeyType: "TYPE_X509_PEM_FILE",
-    // });
     // let serviceAccountKey = new gcp.serviceAccount.Key("my-service-account-key", { serviceAccountId: serviceAccount.accountId });
 
     // Export the bucket name, service account email, and service account key
