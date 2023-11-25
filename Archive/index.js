@@ -6,6 +6,7 @@ const mailgun = require('mailgun-js')({
     domain: "demo.ritvikparamkusham.me",
   });
  
+const dynamoDB = new AWS.DynamoDB.DocumentClient();
  
 exports.handler = async (event, context) => {
   try {
@@ -15,14 +16,18 @@ exports.handler = async (event, context) => {
     const snsMessage = JSON.parse(event.Records[0].Sns.Message);
     console.log(snsMessage);
     const fileUrl = snsMessage.submission_url;
+    const recipient  = snsMessage.email;
     console.log(fileUrl);
 
 
       // Download the file using node-fetch
       const response = await fetch(fileUrl);
       const fileBuffer = await response.buffer(); // Get the file content as a buffer
+
+      // get the private key stored in env variables when google service account is created 
+      const decodedPrivateKey = Buffer.from(process.env.GCP_SERVICE_ACCOUNT_KEY, 'base64').toString('utf-8');
   
-      const keyFileJson = JSON.parse(fs.readFileSync('prime-cosmos-405923-cd296041e562.json'));
+      const keyFileJson = JSON.parse(decodedPrivateKey);
       
       const storage = new Storage({
           projectId: 'prime-cosmos-405923',
@@ -48,7 +53,7 @@ exports.handler = async (event, context) => {
       };
  
     console.log("Sending Email");
-    await sendEmail(mailgun, emailData);
+    await sendEmail(mailgun, emailData,recipient);
  
     return ;
   } catch (error) {
@@ -57,14 +62,32 @@ exports.handler = async (event, context) => {
   }
 };
  
-async function sendEmail(mailgun, data) {
+async function sendEmail(mailgun, data,recipient) {
     return new Promise((resolve, reject) => {
       mailgun.messages().send(data, (error, body) => {
         if (error) {
+          console.log("Unsuccessful email sending")
+          recordEmailEvent("Unsuccessful",recipient);
           reject(error);
         } else {
+          console.log("Successful email sending")
+          recordEmailEvent("Successful",recipient);
           resolve(body);
         }
       });
     });
+}
+
+async function recordEmailEvent(status, email) {
+  const params = {
+    TableName: process.env.DYNAMODB_TABLE_NAME,
+    Item: {
+      email: email,
+      status: status,
+      timestamp: new Date().toISOString(),
+    },
+  };
+  console.log(params);
+  await dynamoDB.put(params).promise();
+  return;
 }

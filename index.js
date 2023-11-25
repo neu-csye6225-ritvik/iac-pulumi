@@ -198,7 +198,8 @@ const main = async () => {
 
     // Create a Google Cloud storage bucket
     const bucket = new gcp.storage.Bucket("my-bucket-check", {
-        location: "US"
+        location: "US",
+        forceDestroy: false,
     });
 
     // // Create a service account
@@ -217,16 +218,36 @@ const main = async () => {
     const bucketAdminBinding = new gcp.projects.IAMBinding("bucketAdminBinding", {
         members: [pulumi.interpolate`serviceAccount:${serviceAccount.email}`],
         role: "roles/storage.admin",  // admin role for managing storage buckets
-        project: config.gcpproject,  // assuming the project is configured in Pulumi
+        project: config.gcpproject, 
     });
 
     // Export the serviceAccountKey, possibly write it to a JSON file and use the path as GOOGLE_APPLICATION_CREDENTIALS
-    const keyFilePath = pulumi.all([serviceAccountKey.privateKey, serviceAccountKey.name]).apply(([privateKey, fileName]) => {
-        const filePath = path.join(config.__dirname, `fileName.json`);
-        fs.writeFileSync(filePath, privateKey);
-        return filePath;
-    });
+    // const keyFilePath = pulumi.all([serviceAccountKey.privateKey, serviceAccountKey.name]).apply(([privateKey, fileName]) => {
+    //     const filePath = path.join(config.__dirname, `fileName.json`);
+    //     fs.writeFileSync(filePath, privateKey);
+    //     return filePath;
+    // });
 
+    // Export the private key
+    // const privateKey = serviceAccountKey.privateKey;
+
+    // serviceAccountKey.privateKey.apply(privateKey => {
+    //     fs.writeFileSync('privateKey.json', privateKey);
+    // });
+
+    // Load the base64 encoded private key from config
+    // let conf = new pulumi.Config();
+    // let privateKeyEncoded = conf.requireSecret("privateKeyEncoded");
+
+    // // On resource creation, decode the private key and write it to a file
+    // privateKeyEncoded.apply(privateKeyEncoded => {
+    //     // Decode the base64 private key 
+    //     let privateKey = Buffer.from(privateKeyEncoded, 'base64').toString('utf8');
+    //     // Write the decoded private key to a file
+    //     fs.writeFileSync('privateKey.pem', privateKey);
+    // });
+
+    // const privateFileJson = JSON.stringify(fs.readFileSync('privateKey.pem'));
     //create SNS topic
     const snsTopic = new aws.sns.Topic("snsTopicAmi", {});
 
@@ -247,8 +268,58 @@ const main = async () => {
 
     new aws.iam.RolePolicyAttachment("lambdaRolePolicyAttachment", {
         role: lambdaRole.name,
-        policyArn: "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole",
+        // policyArn: "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole",
+        policyArn: "arn:aws:iam::aws:policy/AWSLambda_FullAccess",
     });
+
+    const dynamoDB = new aws.dynamodb.Table("dynamoDBTable", {
+        name: "email-track-lambda",
+        attributes: [
+            {name: "email",type: "S",},
+            {name: "status",type: "S",},
+            {name: "timestamp", type: "S",},
+        ],
+        hashKey: "email",
+        rangeKey: "status",
+        readCapacity: 5,
+        writeCapacity: 5,
+        globalSecondaryIndexes: [
+            {
+                name: "TimestampIndex",
+                hashKey: "timestamp",
+                rangeKey: "email",
+                projectionType: "ALL",
+                readCapacity: 5,
+                writeCapacity: 5,
+            },
+        ],
+    });
+    // Create an IAM policy for DynamoDB access
+    const dynamoDBPolicy = new aws.iam.Policy("DynamoDBAccessPolicy", {
+        policy: {
+            Version: "2012-10-17",
+            Statement: [
+                {
+                    Effect: "Allow",
+                    Action: [
+                        "dynamodb:BatchGet*",
+                        "dynamodb:DescribeStream",
+                        "dynamodb:DescribeTable",
+                        "dynamodb:Get*",
+                        "dynamodb:Query",
+                        "dynamodb:Scan",
+                        "dynamodb:BatchWrite*",
+                        "dynamodb:CreateTable",
+                        "dynamodb:Delete*",
+                        "dynamodb:Update*",
+                        "dynamodb:PutItem"
+                    ],
+                    Resource: dynamoDB.arn,
+                },
+            ],
+        },
+    });
+     
 
     // // Create an AWS Lambda function
     const lambdaFunction = new aws.lambda.Function("lambdaFunction", {
@@ -265,6 +336,7 @@ const main = async () => {
                 "GCP_PROJECT_ID": gcp.config.project, // Example: Pass the GCP Project ID to Lambda
                 "GOOGLE_STORAGE_BUCKET": bucket.url,
                 "GOOGLE_STORAGE_BUCKET_NAME": bucket.name,
+                "DYNAMODB_TABLE_NAME": dynamoDB.name,
             }
         },
     });
@@ -282,8 +354,6 @@ const main = async () => {
         protocol: "lambda",
         topic: snsTopic.arn,
     });
-
-
 
     // Create an IAM role
     const role = new aws.iam.Role("role", {
@@ -303,14 +373,38 @@ const main = async () => {
     });
 
     // Attach CloudWatchAgentServerPolicy policy to IAM role
-    new aws.iam.RolePolicyAttachment("rolePolicyAttachment", {
+    new aws.iam.RolePolicyAttachment("rolePolicyAttachmentCloudWatch", {
         role: role.name,
         policyArn: "arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy"
     });
 
+    new aws.iam.RolePolicyAttachment("rolePolicyAttachmentDynamoDB", {
+        role: role.name,
+        policyArn: "arn:aws:iam::aws:policy/AmazonDynamoDBFullAccess"
+    });
+
+    
+
     // // Create an IAM instance profile for the role
     const instanceProfile = new aws.iam.InstanceProfile("myInstanceProfile", {
         role: role.name,
+    });
+
+    const snsPublishPolicy = new aws.iam.Policy("SNSPublishPolicy", {
+        policy: {
+            Version: "2012-10-17",
+            Statement: [{
+                Effect: "Allow",
+                Action: "sns:Publish",
+                Resource: snsTopic.arn,
+            }],
+        },
+        roles: [role.name],
+    });
+
+    const snsPublishPolicyAttachment = new aws.iam.RolePolicyAttachment("SNSPublishPolicyAttachment", {
+        role: role.name,
+        policyArn: snsPublishPolicy.arn,
     });
 
 
@@ -494,6 +588,8 @@ const main = async () => {
             dimensions: { AutoScalingGroupName: autoScalingGroup.name },
         }
     );
+
+ 
 
     const hostedZoneId = config.hostedZoneId;
 
