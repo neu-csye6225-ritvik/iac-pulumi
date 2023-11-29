@@ -199,7 +199,10 @@ const main = async () => {
     // Create a Google Cloud storage bucket
     const bucket = new gcp.storage.Bucket("my-bucket-check", {
         location: "US",
-        forceDestroy: false,
+        forceDestroy: true,
+        versioning: {
+            enabled: true,
+        },
     });
 
     // // Create a service account
@@ -218,36 +221,9 @@ const main = async () => {
     const bucketAdminBinding = new gcp.projects.IAMBinding("bucketAdminBinding", {
         members: [pulumi.interpolate`serviceAccount:${serviceAccount.email}`],
         role: "roles/storage.admin",  // admin role for managing storage buckets
-        project: config.gcpproject, 
+        project: config.gcpproject,
     });
 
-    // Export the serviceAccountKey, possibly write it to a JSON file and use the path as GOOGLE_APPLICATION_CREDENTIALS
-    // const keyFilePath = pulumi.all([serviceAccountKey.privateKey, serviceAccountKey.name]).apply(([privateKey, fileName]) => {
-    //     const filePath = path.join(config.__dirname, `fileName.json`);
-    //     fs.writeFileSync(filePath, privateKey);
-    //     return filePath;
-    // });
-
-    // Export the private key
-    // const privateKey = serviceAccountKey.privateKey;
-
-    // serviceAccountKey.privateKey.apply(privateKey => {
-    //     fs.writeFileSync('privateKey.json', privateKey);
-    // });
-
-    // Load the base64 encoded private key from config
-    // let conf = new pulumi.Config();
-    // let privateKeyEncoded = conf.requireSecret("privateKeyEncoded");
-
-    // // On resource creation, decode the private key and write it to a file
-    // privateKeyEncoded.apply(privateKeyEncoded => {
-    //     // Decode the base64 private key 
-    //     let privateKey = Buffer.from(privateKeyEncoded, 'base64').toString('utf8');
-    //     // Write the decoded private key to a file
-    //     fs.writeFileSync('privateKey.pem', privateKey);
-    // });
-
-    // const privateFileJson = JSON.stringify(fs.readFileSync('privateKey.pem'));
     //create SNS topic
     const snsTopic = new aws.sns.Topic("snsTopicAmi", {});
 
@@ -268,63 +244,73 @@ const main = async () => {
 
     new aws.iam.RolePolicyAttachment("lambdaRolePolicyAttachment", {
         role: lambdaRole.name,
-        // policyArn: "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole",
-        policyArn: "arn:aws:iam::aws:policy/AWSLambda_FullAccess",
+        policyArn: "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole",
     });
 
-    const dynamoDB = new aws.dynamodb.Table("dynamoDBTable", {
-        name: "email-track-lambda",
-        attributes: [
-            {name: "email",type: "S",},
-            {name: "status",type: "S",},
-            {name: "timestamp", type: "S",},
-        ],
-        hashKey: "email",
-        rangeKey: "status",
-        readCapacity: 5,
-        writeCapacity: 5,
-        globalSecondaryIndexes: [
-            {
-                name: "TimestampIndex",
-                hashKey: "timestamp",
-                rangeKey: "email",
-                projectionType: "ALL",
-                readCapacity: 5,
-                writeCapacity: 5,
-            },
-        ],
-    });
-    // Create an IAM policy for DynamoDB access
-    const dynamoDBPolicy = new aws.iam.Policy("DynamoDBAccessPolicy", {
+    const secretsManagerPolicy = new aws.iam.Policy("secretsManagerPolicy", {
         policy: {
             Version: "2012-10-17",
-            Statement: [
-                {
-                    Effect: "Allow",
-                    Action: [
-                        "dynamodb:BatchGet*",
-                        "dynamodb:DescribeStream",
-                        "dynamodb:DescribeTable",
-                        "dynamodb:Get*",
-                        "dynamodb:Query",
-                        "dynamodb:Scan",
-                        "dynamodb:BatchWrite*",
-                        "dynamodb:CreateTable",
-                        "dynamodb:Delete*",
-                        "dynamodb:Update*",
-                        "dynamodb:PutItem"
-                    ],
-                    Resource: dynamoDB.arn,
-                },
-            ],
+            Statement: [{
+                Action: "secretsmanager:*", // Use the wildcard to allow any action
+                Effect: "Allow",
+                Resource: "*", // Use the wildcard to allow access to any resource
+            }],
         },
     });
-     
+
+    new aws.iam.RolePolicyAttachment("lambdaRolePolicyAttachmentAWSSecretsManager", {
+        role: lambdaRole.name,
+        policyArn: secretsManagerPolicy.arn,
+    });
+
+
+    // Create DynamoDB table
+    const dynamoDB = new aws.dynamodb.Table("emailtrack", {
+        name: "emailtrack",
+        attributes: [
+            { name: "id", type: "S" },
+        ],
+        hashKey: "id",
+        billingMode: "PAY_PER_REQUEST",
+    });
+
+    const dynamoDBFullAccessPolicy = new aws.iam.Policy("dynamoDBFullAccessPolicy", {
+        policy: {
+            Version: "2012-10-17",
+            Statement: [{
+                Action: [
+                    "dynamodb:PutItem",
+                    "dynamodb:GetItem",
+                    "dynamodb:Scan",
+                    "dynamodb:Query",
+                    "dynamodb:UpdateItem",
+                    "dynamodb:DeleteItem"
+                ],
+                Resource: dynamoDB.arn, // Replace with your DynamoDB table ARN if possible
+                Effect: "Allow"
+            }]
+        }
+    });
+
+    const dynamoDBFullAccessPolicyAttachment = new aws.iam.PolicyAttachment("dynamoDBFullAccessPolicyAttachment", {
+        roles: [lambdaRole],
+        policyArn: dynamoDBFullAccessPolicy.arn,
+    });
+
+    // Create a secret
+    let gcpSecretKey = new aws.secretsmanager.Secret("mysecret", {});
+
+    // Create a secret version
+    let gcpSecretKeyVersion = new aws.secretsmanager.SecretVersion("mysecretversion", {
+        secretId: gcpSecretKey.id,
+        secretString: serviceAccountKey.privateKey,
+    });
+
 
     // // Create an AWS Lambda function
     const lambdaFunction = new aws.lambda.Function("lambdaFunction", {
         code: new pulumi.asset.AssetArchive({
-            ".": new pulumi.asset.FileArchive("./lambda"),
+            ".": new pulumi.asset.FileArchive("/Users/ritvikparamkusham/Downloads/Cloud/project9/serverless/serverless/Archive.zip"),
         }),
         handler: "index.handler",
         role: lambdaRole.arn,
@@ -332,15 +318,17 @@ const main = async () => {
         environment: {
             // Add environment variables for GCP access keys or configurations
             variables: {
-                "GCP_SERVICE_ACCOUNT_KEY": serviceAccountKey.privateKey, // Example: Pass the private key to Lambda
-                "GCP_PROJECT_ID": gcp.config.project, // Example: Pass the GCP Project ID to Lambda
+                "GCP_SERVICE_ACCOUNT_KEY": serviceAccountKey.privateKey, // service aacount created private key to Lambda
+                "GCP_PROJECT_ID": gcp.config.project, // GCP Project ID 
                 "GOOGLE_STORAGE_BUCKET": bucket.url,
                 "GOOGLE_STORAGE_BUCKET_NAME": bucket.name,
                 "DYNAMODB_TABLE_NAME": dynamoDB.name,
+                "MAILGUN_API_KEY": config.mailgunapikey,
+                "DOMAIN": config.domainName,
+                "GCP_SECRET_KEY": gcpSecretKeyVersion.arn,
             }
         },
     });
-
 
     new aws.lambda.Permission("lambdaPermission", {
         action: "lambda:InvokeFunction",
@@ -354,6 +342,16 @@ const main = async () => {
         protocol: "lambda",
         topic: snsTopic.arn,
     });
+
+
+    // Grant Lambda permissions to access the DynamoDB table
+    const tableGrant = new aws.lambda.Permission("tableGrant", {
+        action: "lambda:InvokeFunction",
+        function: lambdaFunction.name,
+        principal: "dynamodb.amazonaws.com",
+        sourceArn: dynamoDB.arn,
+    });
+
 
     // Create an IAM role
     const role = new aws.iam.Role("role", {
@@ -383,7 +381,11 @@ const main = async () => {
         policyArn: "arn:aws:iam::aws:policy/AmazonDynamoDBFullAccess"
     });
 
-    
+    new aws.iam.RolePolicyAttachment("rolePolicyAttachmentLambda", {
+        role: role.name,
+        // policyArn: "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole",
+        policyArn: "arn:aws:iam::aws:policy/AWSLambda_FullAccess",
+    });
 
     // // Create an IAM instance profile for the role
     const instanceProfile = new aws.iam.InstanceProfile("myInstanceProfile", {
@@ -432,7 +434,6 @@ const main = async () => {
     echo "SNSTOPICARN=${snsTopic.arn}" >> .env
     echo "AWS_REGION=us-east-1" >> .env
     echo "AWS_PROFILE=demo" >> .env
-    echo "MAILGUN_API=e8500bfb35a6d00230540dada439281e-5d2b1caa-884ab131" >> .env
 
 
     sudo systemctl daemon-reload
@@ -515,7 +516,7 @@ const main = async () => {
 
     const autoScalingGroup = new aws.autoscaling.Group("asg", {
         name: "asg_launch_config_ami",
-        maxSize: 4,
+        maxSize: 3,
         minSize: 1,
         desiredCapacity: 1,
         forceDelete: true,
@@ -589,7 +590,7 @@ const main = async () => {
         }
     );
 
- 
+
 
     const hostedZoneId = config.hostedZoneId;
 
@@ -604,13 +605,6 @@ const main = async () => {
             evaluateTargetHealth: true,
         }],
     });
-
-    // let serviceAccountKey = new gcp.serviceAccount.Key("my-service-account-key", { serviceAccountId: serviceAccount.accountId });
-
-    // Export the bucket name, service account email, and service account key
-    // export let bucketName = bucket.name;
-    // export let serviceAccountEmail = serviceAccount.email;
-    // export let serviceAccountKey = serviceAccountKey.privateKey;
 
 }
 
