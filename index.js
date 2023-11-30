@@ -413,9 +413,6 @@ const main = async () => {
     // User data script
     const userDataScript = pulumi.interpolate`#!/bin/bash
     
-    sudo aws configure set aws_access_key_id AKIAQSAFOW3OUIFYXY2Z --profile demo
-    sudo aws configure set aws_secret_access_key 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 --profile demo
-    
     sudo cp -r .aws /opt/webappuser
 
     sudo chown -R webappuser:webappgroup /opt/webappuser/.aws
@@ -593,7 +590,6 @@ const main = async () => {
 
 
     const hostedZoneId = config.hostedZoneId;
-
 
     const demoArecord = new route53.Record("aRecord", {
         zoneId: hostedZoneId,
