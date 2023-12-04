@@ -488,8 +488,8 @@ const main = async () => {
         name: "csye6225-lb-alb-tg",
         port: 7799,//application port
         targetType: "instance",
-
         protocol: "HTTP",
+        enableHttp2:true,
         vpcId: vpc.id,
         healthCheck: {
             healthyThreshold: 3,
@@ -501,13 +501,30 @@ const main = async () => {
     });
 
     // Create an AWS Listener for the Load Balancer
-    const listener = new aws.lb.Listener("front_end", {
+    // const listener = new aws.lb.Listener("front_end", {
+    //     loadBalancerArn: lb.arn,
+    //     port: 80,//http port
+    //     protocol: "HTTP",
+    //     defaultActions: [{
+    //         type: "forward",
+    //         targetGroupArn: targetGroup.arn,
+    //     }],
+    // });
+
+    // An example certificate ARN
+    const certArn = "arn:aws:acm:us-east-1:038666155741:certificate/5bc39397-5d1d-4021-ab10-428371cbe7d9"; // replace with your certificate ARN
+
+    // Configure a listener for HTTPS traffic
+    const listener = new aws.lb.Listener("https-listener", {
         loadBalancerArn: lb.arn,
-        port: 80,//http port
-        protocol: "HTTP",
+        port: 443,
+        protocol: "HTTPS",
+        sslPolicy: "ELBSecurityPolicy-2016-08",
+        enableHttp2: true,
+        certificateArn: certArn, // reference to your ACM certificate ARN
         defaultActions: [{
             type: "forward",
-            targetGroupArn: targetGroup.arn,
+            targetGroupArn: targetGroup.arn, 
         }],
     });
 
@@ -586,8 +603,6 @@ const main = async () => {
             dimensions: { AutoScalingGroupName: autoScalingGroup.name },
         }
     );
-
-
 
     const hostedZoneId = config.hostedZoneId;
 
