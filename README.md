@@ -1,5 +1,9 @@
 # web-app
 <a href="https://github.com/neu-csye6225-ritvik/webapp"> Web Application </a>
+
+# serverless
+<a href="https://github.com/neu-csye6225-ritvik/serverless"> AWS Lambda Function for AWS, GCP interaction </a>
+
 # iac-pulumi
 Infrastructure as code with pulumi
 
